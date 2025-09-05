@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gram-Panchayat Harule</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* Loader Animation */
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    #loader {
+      display:none;
+      position:fixed;
+      top:0; left:0;
+      width:100%; height:100%;
+      background:rgba(0,0,0,0.5);
+      justify-content:center;
+      align-items:center;
+      z-index:9999;
+    }
+    #loader div {
+      width:60px; 
+      height:60px; 
+      border:6px solid #fff; 
+      border-top:6px solid #3498db; 
+      border-radius:50%; 
+      animation:spin 1s linear infinite;
+    }
+    .auth-box {
+      margin: 50px auto;
+      padding: 20px;
+      max-width: 320px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #f9f9f9;
+    }
+    .auth-box input, .auth-box button {
+      display:block;
+      width:100%;
+      margin:8px 0;
+      padding:10px;
+    }
+    .auth-box p {
+      text-align:center;
+      margin-top:10px;
+    }
+    .auth-box a {
+      color:#3498db;
+      cursor:pointer;
+    }
+    .toggle {
+      position:absolute;
+      right:15px;
+      margin-top:-35px;
+      cursor:pointer;
+      font-size:14px;
+      color:#3498db;
+    }
+    .input-container {
+      position:relative;
+    }
+  </style>
+</head>
+<body>
+  <!-- Loader -->
+  <div id="loader"><div></div></div>
+
+  <!-- Login -->
+  <div id="loginPage" class="auth-box">
+    <h2>Login</h2>
+    <input id="username" placeholder="Username" />
+    <div class="input-container">
+      <input id="password" type="password" placeholder="Password" />
+      <span class="toggle" onclick="togglePassword('password')">👁️</span>
+    </div>
+    <button onclick="login()">Login</button>
+    <p><a onclick="showForgotPassword()">Forgot Password?</a></p>
+    <p>Don’t have an account? <a onclick="document.getElementById('loginPage').style.display='none';document.getElementById('registerPage').style.display='block';">Register here</a></p>
+  </div>
+
+  <!-- Register -->
+  <div id="registerPage" class="auth-box" style="display:none;">
+    <h2>Register</h2>
+    <input id="regUsername" placeholder="Choose Username" />
+    <div class="input-container">
+      <input id="regPassword" type="password" placeholder="Choose Password" />
+      <span class="toggle" onclick="togglePassword('regPassword')">👁️</span>
+    </div>
+    <div class="input-container">
+      <input id="regConfirm" type="password" placeholder="Confirm Password" />
+      <span class="toggle" onclick="togglePassword('regConfirm')">👁️</span>
+    </div>
+    <input id="regMobile" placeholder="Mobile Number" />
+    <button onclick="register()">Register</button>
+    <p>Already have an account? <a onclick="document.getElementById('registerPage').style.display='none';document.getElementById('loginPage').style.display='block';">Login here</a></p>
+  </div>
+
+  <!-- Forgot Password -->
+  <div id="forgotPage" class="auth-box" style="display:none;">
+    <h2>Reset Password</h2>
+    <input id="forgotMobile" placeholder="Registered Mobile Number" />
+    <div class="input-container">
+      <input id="newPassword" type="password" placeholder="New Password" />
+      <span class="toggle" onclick="togglePassword('newPassword')">👁️</span>
+    </div>
+    <button onclick="resetPassword()">Change Password</button>
+    <p><a onclick="backToLogin()">Back to Login</a></p>
+  </div>
+
+  <!-- Home -->
+  <div id="homePage" style="display:none;">
+    <h2>Welcome 🎉</h2>
+    <div class="top-bar">
+      <select id="yearSelect" onchange="yearChanged()"></select>
+      <input id="searchInput" list="fileSuggestions" placeholder="Search (e.g. namuna no 1)" />
+      <datalist id="fileSuggestions"></datalist>
+      <button onclick="searchFile()">Open</button>
+    </div>
+    <div id="fileSection"></div>
+  </div>
+
+  <!-- Image Modal -->
+  <div id="imageModal" style="display:none; position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10000;justify-content:center;align-items:center;">
+    <div style="position:relative;background:#fff;padding:20px;border-radius:10px;max-width:90%;max-height:90%;">
+      <img id="modalImg" src="" style="max-width:100%;max-height:80vh;display:block;margin:auto;" />
+      <button onclick="printImage()">🖨️ Print</button>
+      <button onclick="closeModal()">❌ Close</button>
+    </div>
+  </div>
+
+  <!-- External Script -->
+  <script src="script.js"></script>
+</body>
+</html>
