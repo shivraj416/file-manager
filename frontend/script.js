@@ -1,3 +1,33 @@
+// ---- CONFIG: set this to your backend (use PC LAN IP or deployed URL for Android) ----
+const API_BASE = "http://localhost:5000"; // <-- change to "http://192.168.1.100:5000" or your deployed URL
+
+// ---- Credentials (saved on register) ----
+let REGISTERED_USERNAME = localStorage.getItem("REGISTERED_USERNAME") || null;
+let REGISTERED_PASSWORD = localStorage.getItem("REGISTERED_PASSWORD") || null;
+let REGISTERED_MOBILE   = localStorage.getItem("REGISTERED_MOBILE") || null;
+
+// ---- Session timeout (5 minutes) ----
+const SESSION_TIMEOUT = 5 * 60 * 1000; // 5 minutes in ms
+
+function setSessionActive() {
+  localStorage.setItem("LOGGED_IN", "true");
+  localStorage.setItem("LAST_LOGIN", Date.now().toString());
+}
+
+function isSessionValid() {
+  const loggedIn = localStorage.getItem("LOGGED_IN") === "true";
+  const lastLogin = parseInt(localStorage.getItem("LAST_LOGIN") || "0", 10);
+  if (!loggedIn || !lastLogin) return false;
+  return Date.now() - lastLogin <= SESSION_TIMEOUT;
+}
+
+function logout() {
+  localStorage.removeItem("LOGGED_IN");
+  localStorage.removeItem("LAST_LOGIN");
+  document.getElementById("homePage").style.display = "none";
+  document.getElementById("loginPage").style.display = "block";
+}
+
 // ---- File key generator ----
 function buildFileKeys() {
   const base = [];
@@ -62,10 +92,14 @@ function register() {
     return;
   }
 
-  // ✅ Save in localStorage
-  localStorage.setItem("username", u);
-  localStorage.setItem("password", p);
-  localStorage.setItem("mobile", m);
+  // ✅ Save to memory & persist
+  REGISTERED_USERNAME = u;
+  REGISTERED_PASSWORD = p;
+  REGISTERED_MOBILE = m;
+
+  localStorage.setItem("REGISTERED_USERNAME", u);
+  localStorage.setItem("REGISTERED_PASSWORD", p);
+  localStorage.setItem("REGISTERED_MOBILE", m);
 
   alert("✅ Registration successful! Now login.");
   document.getElementById("registerPage").style.display = "none";
@@ -85,18 +119,28 @@ function login() {
   const u = uEl.value.trim();
   const p = pEl.value.trim();
 
-  const savedUser = localStorage.getItem("username");
-  const savedPass = localStorage.getItem("password");
+  if (u === REGISTERED_USERNAME && p === REGISTERED_PASSWORD) {
+    document.getElementById("loginPage").style.display = "none";
+    document.getElementById("homePage").style.display = "block";
+    loadYears();
+    populateFileSuggestions();
+    setSessionActive();
+  } else {
+    alert("❌ Invalid username or password!");
+  }
+}
 
-  if (u === savedUser && p === savedPass) {
+// ---- Auto login if registered & session valid ----
+window.addEventListener("load", () => {
+  if (REGISTERED_USERNAME && REGISTERED_PASSWORD && isSessionValid()) {
     document.getElementById("loginPage").style.display = "none";
     document.getElementById("homePage").style.display = "block";
     loadYears();
     populateFileSuggestions();
   } else {
-    alert("❌ Invalid username or password!");
+    logout();
   }
-}
+});
 
 // ---- Forgot password functions ----
 function showForgotPassword() {
@@ -121,10 +165,9 @@ function resetPassword() {
     return;
   }
 
-  const savedMobile = localStorage.getItem("mobile");
-
-  if (enteredMobile === savedMobile) {
-    localStorage.setItem("password", newPass);
+  if (enteredMobile === REGISTERED_MOBILE) {
+    REGISTERED_PASSWORD = newPass;
+    localStorage.setItem("REGISTERED_PASSWORD", newPass); // ✅ persist
     alert("✅ Password reset successful! Please login.");
     document.getElementById("forgotPage").style.display = "none";
     document.getElementById("loginPage").style.display = "block";
@@ -166,7 +209,6 @@ function loadYears() {
   for (let y = 2010; y <= 2039; y++) {
     const safeValue = `${y}-${String(y + 1).slice(-2)}`;
     const prettyLabel = `${y} / ${String(y + 1).slice(-2)}`;
-
     const option = document.createElement("option");
     option.value = safeValue;
     option.textContent = prettyLabel;
@@ -174,7 +216,6 @@ function loadYears() {
   }
 }
 
-// ---- Year changed ----
 function yearChanged() {
   const section = document.getElementById("fileSection");
   const input = document.getElementById("searchInput");
@@ -216,13 +257,13 @@ function searchFile() {
   loadImages(year, query);
 }
 
-// ---- Cancel file ----
 function cancelFile() {
   const section = document.getElementById("fileSection");
   if (section) section.innerHTML = "";
 }
 
 // ---- Upload images/PDFs ----
+// NOTE: this function now does robust per-file uploads, sequentially, with timeouts and friendly errors.
 function uploadImages(year, fileKey) {
   const input = document.createElement("input");
   input.type = "file";
@@ -233,31 +274,79 @@ function uploadImages(year, fileKey) {
     const files = e.target.files;
     if (!files || !files.length) return;
 
+    if (!navigator.onLine) {
+      alert("You are offline. Please connect to the internet and try again.");
+      return;
+    }
+
     showLoader(true);
 
-    try {
-      const uploadPromises = Array.from(files).map(async (file) => {
-        if (file.type === "application/pdf" && file.size > 50 * 1024 * 1024) {
-          alert(`PDF "${file.name}" exceeds 50 MB limit!`);
-          return;
-        }
+    const failed = [];
+    const uploaded = [];
 
+    // Upload sequentially to reduce memory pressure on server (safer for mobile)
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+
+      if (file.type === "application/pdf" && file.size > 50 * 1024 * 1024) {
+        failed.push({ name: file.name, reason: "PDF exceeds 50 MB limit" });
+        continue;
+      }
+
+      // create small timeout wrapper for fetch using AbortController
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60 * 1000); // 60s timeout
+
+      try {
         const formData = new FormData();
         formData.append("files", file);
 
-        await fetch(
-          `http://localhost:5000/upload/${encodeURIComponent(year)}/${encodeURIComponent(fileKey)}`,
-          { method: "POST", body: formData }
-        );
-      });
+        // use encodeURIComponent on path pieces
+        const url = `${API_BASE}/upload/${encodeURIComponent(year)}/${encodeURIComponent(fileKey)}`;
 
-      await Promise.all(uploadPromises);
-      loadImages(year, fileKey);
-    } catch (err) {
-      console.error("❌ Upload error:", err);
-      alert("Some uploads failed! Check console.");
-    } finally {
-      showLoader(false);
+        const res = await fetch(url, {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+          // try to parse JSON message if present
+          let errText = `HTTP ${res.status}`;
+          try {
+            const json = await res.json();
+            if (json && json.error) errText = json.error;
+            else if (json && json.message) errText = json.message;
+          } catch (parseErr) {
+            // ignore parse error
+          }
+          failed.push({ name: file.name, reason: errText });
+          console.error("Upload failed for", file.name, errText);
+        } else {
+          uploaded.push(file.name);
+        }
+      } catch (err) {
+        clearTimeout(timeoutId);
+        const reason = err.name === "AbortError" ? "Upload timed out" : err.message || "Network error";
+        failed.push({ name: file.name, reason });
+        console.error("Upload error for", file.name, err);
+      }
+    }
+
+    showLoader(false);
+
+    // Reload images (best effort)
+    loadImages(year, fileKey);
+
+    // Summary to user
+    if (uploaded.length > 0 && failed.length === 0) {
+      alert(`✅ Uploaded ${uploaded.length} file(s) successfully.`);
+    } else if (uploaded.length > 0 && failed.length > 0) {
+      alert(`⚠️ ${uploaded.length} uploaded, ${failed.length} failed.\nFailed: ${failed.map(f => `${f.name} (${f.reason})`).join(", ")}`);
+    } else {
+      alert(`❌ All uploads failed. Reason(s): ${failed.map(f => `${f.name} (${f.reason})`).join(", ")}`);
     }
   };
 
@@ -270,48 +359,68 @@ async function loadImages(year, fileKey) {
   if (!container) return;
   container.innerHTML = "";
 
-  const res = await fetch(`http://localhost:5000/files/${encodeURIComponent(year)}/${encodeURIComponent(fileKey)}`);
-  const results = await res.json();
+  try {
+    const res = await fetch(`${API_BASE}/files/${encodeURIComponent(year)}/${encodeURIComponent(fileKey)}`);
+    if (!res.ok) {
+      const text = await res.text().catch(()=>null);
+      console.error("Files fetch failed:", res.status, text);
+      container.innerHTML = "<p>Error loading files.</p>";
+      return;
+    }
+    const results = await res.json();
 
-  results.forEach((item) => {
-    const wrapper = document.createElement("div");
-    wrapper.style.display = "inline-block";
-    wrapper.style.margin = "10px";
-    wrapper.style.textAlign = "center";
-
-    if (item.fileUrl.endsWith(".pdf")) {
-      const link = document.createElement("a");
-      link.href = item.fileUrl;
-      link.target = "_blank";
-      link.textContent = "Open PDF";
-      wrapper.appendChild(link);
-    } else {
-      const img = document.createElement("img");
-      img.src = item.fileUrl;
-      img.style.width = "100px";
-      img.style.height = "100px";
-      img.style.objectFit = "cover";
-      img.style.cursor = "pointer";
-      img.onclick = () => openModal(img.src);
-      wrapper.appendChild(img);
+    if (!Array.isArray(results) || results.length === 0) {
+      container.innerHTML = "<p>No files yet.</p>";
+      return;
     }
 
-    const btn = document.createElement("button");
-    btn.textContent = "Delete";
-    btn.style.display = "block";
-    btn.style.marginTop = "5px";
-    btn.onclick = () => deleteFile(item._id, item.publicId, year, fileKey);
+    results.forEach((item) => {
+      const wrapper = document.createElement("div");
+      wrapper.style.display = "inline-block";
+      wrapper.style.margin = "10px";
+      wrapper.style.textAlign = "center";
 
-    wrapper.appendChild(btn);
-    container.appendChild(wrapper);
-  });
+      if (item.fileUrl && item.fileUrl.endsWith(".pdf")) {
+        const link = document.createElement("a");
+        link.href = item.fileUrl;
+        link.target = "_blank";
+        link.textContent = "Open PDF";
+        wrapper.appendChild(link);
+      } else if (item.fileUrl) {
+        const img = document.createElement("img");
+        img.src = item.fileUrl;
+        img.style.width = "100px";
+        img.style.height = "100px";
+        img.style.objectFit = "cover";
+        img.style.cursor = "pointer";
+        img.onclick = () => openModal(img.src);
+        wrapper.appendChild(img);
+      } else {
+        const span = document.createElement("div");
+        span.textContent = "Unknown file";
+        wrapper.appendChild(span);
+      }
+
+      const btn = document.createElement("button");
+      btn.textContent = "Delete";
+      btn.style.display = "block";
+      btn.style.marginTop = "5px";
+      btn.onclick = () => deleteFile(item._id, item.publicId, year, fileKey);
+
+      wrapper.appendChild(btn);
+      container.appendChild(wrapper);
+    });
+  } catch (err) {
+    console.error("❌ Load images error:", err);
+    container.innerHTML = "<p>Error loading files. Check server.</p>";
+  }
 }
 
 // ---- Delete file ----
 async function deleteFile(id, publicId, year, fileKey) {
   try {
     showLoader(true);
-    const res = await fetch("http://localhost:5000/file", {
+    const res = await fetch(`${API_BASE}/file`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, publicId }),

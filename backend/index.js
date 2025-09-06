@@ -49,10 +49,13 @@ const FileSchema = new mongoose.Schema({
 const File = mongoose.model("File", FileSchema);
 
 // ===================
-// Multer (memory storage)
+// Multer (with limits)
 // ===================
 const storage = multer.memoryStorage();
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB per file
+});
 
 // ===================
 // Helper: Stream upload
@@ -79,7 +82,7 @@ const streamUpload = (file, folder) => {
 // Routes
 // ===================
 
-// ⚡ Ultra-fast upload (respond first, DB save async)
+// ⚡ Safe upload (sequential for mobile stability)
 app.post("/upload/:year/:fileKey", upload.array("files"), async (req, res) => {
   try {
     const year = decodeURIComponent(req.params.year);
@@ -89,36 +92,37 @@ app.post("/upload/:year/:fileKey", upload.array("files"), async (req, res) => {
       return res.status(400).json({ error: "No files uploaded" });
     }
 
-    // Start uploads in parallel
-    const uploadPromises = req.files.map((file) =>
-      streamUpload(file, `${year}/${fileKey}`)
-    );
+    const results = [];
+    for (const file of req.files) {
+      try {
+        const result = await streamUpload(file, `${year}/${fileKey}`);
+        results.push({
+          year,
+          fileKey,
+          fileUrl: result.secure_url,
+          publicId: result.public_id,
+          fileType: file.mimetype,
+        });
 
-    // Wait for uploads
-    const results = await Promise.all(uploadPromises);
+        // Save to DB async
+        File.create({
+          year,
+          fileKey,
+          fileUrl: result.secure_url,
+          publicId: result.public_id,
+          fileType: file.mimetype,
+        }).catch((err) => console.error("DB save failed:", err));
+      } catch (err) {
+        console.error("❌ Upload error (one file):", err);
+        results.push({
+          error: true,
+          fileName: file.originalname,
+          reason: err.message || "Cloudinary upload failed",
+        });
+      }
+    }
 
-    // Send response immediately 🚀
-    res.json({
-      success: true,
-      files: results.map((r) => ({
-        year,
-        fileKey,
-        fileUrl: r.secure_url,
-        publicId: r.public_id,
-        fileType: r.resource_type,
-      })),
-    });
-
-    // Save to DB in background (non-blocking)
-    results.forEach((result, i) => {
-      File.create({
-        year,
-        fileKey,
-        fileUrl: result.secure_url,
-        publicId: result.public_id,
-        fileType: req.files[i].mimetype,
-      }).catch((err) => console.error("DB save failed:", err));
-    });
+    res.json({ success: true, files: results });
   } catch (err) {
     console.error("❌ Upload error:", err);
     res.status(500).json({ error: "Upload failed", details: err.message });
@@ -141,7 +145,6 @@ app.get("/files/:year/:fileKey", async (req, res) => {
 // ⚡ Instant delete (supports both body and query params)
 app.delete("/file/:id?", async (req, res) => {
   try {
-    // Get from body (preferred) or query
     const id = req.body.id || req.query.id;
     const publicId = req.body.publicId || req.query.publicId;
 
@@ -152,20 +155,16 @@ app.delete("/file/:id?", async (req, res) => {
     const file = await File.findById(id);
     if (!file) return res.status(404).json({ error: "File not found" });
 
-    // Respond success immediately
     res.json({ success: true });
 
-    // Decide resource type
     let resourceType = "image";
     if (file.fileType === "application/pdf") resourceType = "raw";
     else if (file.fileType.startsWith("video/")) resourceType = "video";
 
-    // Cloudinary delete
     cloudinary.uploader
       .destroy(publicId, { resource_type: resourceType })
       .catch((err) => console.error("❌ Cloudinary delete failed:", err));
 
-    // Mongo delete
     File.findByIdAndDelete(id).catch((err) =>
       console.error("❌ DB delete failed:", err)
     );
@@ -179,6 +178,6 @@ app.delete("/file/:id?", async (req, res) => {
 // Start Server
 // ===================
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () =>
-  console.log(`🚀 Backend running on http://localhost:${PORT}`)
+app.listen(PORT, "0.0.0.0", () =>
+  console.log(`🚀 Backend running on http://0.0.0.0:${PORT}`)
 );
