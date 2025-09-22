@@ -41,8 +41,10 @@ cloudinary.config({
 const FileSchema = new mongoose.Schema({
   year: String,
   fileKey: String,
-  fileUrl: String, // Cloudinary secure URL
-  publicId: String, // Cloudinary public_id for delete
+  fileUrl: String,     // Main Cloudinary URL
+  publicId: String,    // Main Cloudinary public_id
+  backupUrl: String,   // Backup Cloudinary URL
+  backupId: String,    // Backup Cloudinary public_id
   fileType: String,
   uploadedAt: { type: Date, default: Date.now },
 });
@@ -82,7 +84,7 @@ const streamUpload = (file, folder) => {
 // Routes
 // ===================
 
-// ⚡ Safe upload (sequential for mobile stability)
+// ⚡ Upload with backup
 app.post("/upload/:year/:fileKey", upload.array("files"), async (req, res) => {
   try {
     const year = decodeURIComponent(req.params.year);
@@ -95,21 +97,30 @@ app.post("/upload/:year/:fileKey", upload.array("files"), async (req, res) => {
     const results = [];
     for (const file of req.files) {
       try {
+        // 👉 Main upload
         const result = await streamUpload(file, `${year}/${fileKey}`);
+
+        // 👉 Backup upload
+        const backup = await streamUpload(file, `backup/${year}/${fileKey}`);
+
         results.push({
           year,
           fileKey,
           fileUrl: result.secure_url,
           publicId: result.public_id,
+          backupUrl: backup.secure_url,
+          backupId: backup.public_id,
           fileType: file.mimetype,
         });
 
-        // Save to DB async
+        // Save to DB
         File.create({
           year,
           fileKey,
           fileUrl: result.secure_url,
           publicId: result.public_id,
+          backupUrl: backup.secure_url,
+          backupId: backup.public_id,
           fileType: file.mimetype,
         }).catch((err) => console.error("DB save failed:", err));
       } catch (err) {
@@ -157,13 +168,21 @@ app.delete("/file/:id?", async (req, res) => {
 
     res.json({ success: true });
 
+    // delete from main storage
     let resourceType = "image";
     if (file.fileType === "application/pdf") resourceType = "raw";
     else if (file.fileType.startsWith("video/")) resourceType = "video";
 
     cloudinary.uploader
-      .destroy(publicId, { resource_type: resourceType })
-      .catch((err) => console.error("❌ Cloudinary delete failed:", err));
+      .destroy(file.publicId, { resource_type: resourceType })
+      .catch((err) => console.error("❌ Cloudinary delete (main) failed:", err));
+
+    // delete from backup too
+    cloudinary.uploader
+      .destroy(file.backupId, { resource_type: resourceType })
+      .catch((err) =>
+        console.error("❌ Cloudinary delete (backup) failed:", err)
+      );
 
     File.findByIdAndDelete(id).catch((err) =>
       console.error("❌ DB delete failed:", err)

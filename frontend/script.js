@@ -1,5 +1,8 @@
-// ---- CONFIG: set this to your backend (use PC LAN IP or deployed URL for Android) ----
-const API_BASE = "http://localhost:5000"; // <-- change to "http://192.168.1.100:5000" or your deployed URL
+// ---- CONFIG ----
+const API_BASE = "http://localhost:5000";  
+// ✅ On PC keep localhost
+// ✅ On Mobile (same WiFi) → use "http://192.168.X.X:5000"
+
 
 // ---- Credentials (saved on register) ----
 let REGISTERED_USERNAME = localStorage.getItem("REGISTERED_USERNAME") || null;
